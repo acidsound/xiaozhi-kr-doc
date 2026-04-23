@@ -3,7 +3,9 @@ name = "xiaozhi-tut-archive"
 version = "0.1.0"
 description = "Archive Xiaozhi Feishu wiki pages as Markdown without launching a browser."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "blackboxprotobuf==1.0.1",
+]
 
 [project.scripts]
 archive-feishu = "xiaozhi_archive.cli:main"

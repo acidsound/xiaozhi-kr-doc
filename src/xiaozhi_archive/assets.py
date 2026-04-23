@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from .feishu import FeishuError, extract_wiki_token, slugify
@@ -33,15 +33,18 @@ def localize_markdown_images(markdown_dir: Path, assets_dir: Path, paths: list[P
         def replace(match: re.Match[str]) -> str:
             nonlocal opener
             alt, target = match.groups()
-            if target.startswith("../assets/"):
-                return match.group(0)
-            if urlparse(target).scheme in {"http", "https"} and opener is None:
+            clean_target = target.strip().strip("<>")
+            if clean_target.startswith("../assets/"):
+                encoded = quote(Path(clean_target).as_posix(), safe="/._-~")
+                return f"![{alt}]({encoded})"
+            if urlparse(clean_target).scheme in {"http", "https"} and opener is None:
                 opener = _cookie_opener(source_url)
-            asset = _materialize_image(target, path, assets_dir, opener)
+            asset = _materialize_image(clean_target, path, assets_dir, opener)
             if asset is None:
                 return match.group(0)
             rel_path = os.path.relpath(asset, path.parent)
-            return f"![{alt}]({Path(rel_path).as_posix()})"
+            encoded = quote(Path(rel_path).as_posix(), safe="/._-~")
+            return f"![{alt}]({encoded})"
 
         rewritten = IMAGE_RE.sub(replace, text)
         if rewritten != text:

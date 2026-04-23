@@ -27,7 +27,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-pages", type=int, default=100, help="Maximum pages to fetch in SSR recursive mode")
     parser.add_argument("--no-local-links", action="store_true", help="Keep Feishu wiki links absolute instead of rewriting archived links to relative Markdown paths")
     parser.add_argument("--space-id", help="Wiki space id, only needed if recursive listing cannot infer it")
+    parser.add_argument("--skipped-log", help="Write skipped SSR pages to this file. Defaults to <out>/../skipped.txt in recursive mode.")
     return parser
+
+
+def _write_skipped_log(path: Path, skipped: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(skipped)
+    if body:
+        body += "\n"
+    path.write_text(body, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"rewritten local links in {changed} file(s)", file=sys.stderr)
             for item in skipped:
                 print(f"skipped: {item}", file=sys.stderr)
+            skipped_log = Path(args.skipped_log) if args.skipped_log else out_dir.parent / "skipped.txt"
+            _write_skipped_log(skipped_log, skipped)
+            if skipped:
+                print(f"wrote skipped log: {skipped_log}", file=sys.stderr)
             return 0
 
         wiki_token = extract_wiki_token(args.url_or_token)

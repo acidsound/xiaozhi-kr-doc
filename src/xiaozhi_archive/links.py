@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from .feishu import FeishuError, extract_wiki_token
 
 
-SOURCE_RE = re.compile(r"^(?:Source|원문):\s*(https://[A-Za-z0-9_-]+\.feishu\.cn/wiki/[A-Za-z0-9_-]+)\s*$", re.MULTILINE)
-WIKI_URL_RE = re.compile(r"https://[A-Za-z0-9_-]+\.feishu\.cn/wiki/[A-Za-z0-9_-]+")
+SOURCE_RE = re.compile(r"^(?:Source|원문):\s*(https://[A-Za-z0-9_-]+\.feishu\.cn/(?:wiki|docx)/[A-Za-z0-9_-]+(?:\?[^\s]+)?)\s*$", re.MULTILINE)
+DOC_URL_RE = re.compile(r"https://[A-Za-z0-9_-]+\.feishu\.cn/(?:wiki|docx)/[A-Za-z0-9_-]+(?:\?[^\s)>]+)?")
+LOCAL_MD_QUERY_RE = re.compile(r"(\([^)]+?\.md)\?[^)]*(\))")
 
 
 def build_source_index(markdown_dir: Path) -> dict[str, Path]:
@@ -58,6 +60,7 @@ def _rewrite_line(line: str, current_path: Path, source_index: dict[str, Path]) 
         if target_path is None:
             return url
         rel_path = os.path.relpath(target_path, current_path.parent)
-        return f"<{Path(rel_path).as_posix()}>"
+        return quote(Path(rel_path).as_posix(), safe="/._-~")
 
-    return WIKI_URL_RE.sub(replace, line)
+    line = DOC_URL_RE.sub(replace, line)
+    return LOCAL_MD_QUERY_RE.sub(r"\1\2", line)

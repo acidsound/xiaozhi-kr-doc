@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import unicodedata
+from urllib.parse import unquote
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,9 +60,9 @@ def build_github_wiki(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a GitHub Wiki export from local archive markdown files.")
-    parser.add_argument("--markdown", default="archive/markdown", help="Chinese markdown directory")
-    parser.add_argument("--markdown-kr", default="archive/markdown_kr", help="Korean markdown directory")
-    parser.add_argument("--assets", default="archive/assets", help="Archive assets directory")
+    parser.add_argument("--markdown", default="archive_rebuild/markdown", help="Chinese markdown directory")
+    parser.add_argument("--markdown-kr", default="archive_rebuild/markdown_kr", help="Korean markdown directory")
+    parser.add_argument("--assets", default="archive_rebuild/assets", help="Archive assets directory")
     parser.add_argument("--out", default=".wiki-build", help="Wiki output directory")
     args = parser.parse_args(argv)
 
@@ -131,10 +132,10 @@ def _rewrite_markdown(
         alt, raw_target = match.groups()
         target = raw_target.strip("<>")
         if target.startswith("../assets/"):
-            asset_name = Path(target).name
-            mapped = asset_map.get(asset_name)
-            if mapped:
-                return f"![{alt}]({_wiki_raw_image_url(repo_full_name, mapped)})"
+            for asset_name in _candidate_names(target):
+                mapped = asset_map.get(asset_name)
+                if mapped:
+                    return f"![{alt}]({_wiki_raw_image_url(repo_full_name, mapped)})"
         return match.group(0)
 
     def replace_link(match: re.Match[str]) -> str:
@@ -143,9 +144,10 @@ def _rewrite_markdown(
         if target.startswith("http://") or target.startswith("https://") or target.startswith("mailto:"):
             return match.group(0)
         if target.endswith(".md"):
-            mapped = page_map.get(Path(target).name)
-            if mapped:
-                return f"[{label}]({_wiki_page_url(repo_full_name, mapped.slug)})"
+            for page_name in _candidate_names(target):
+                mapped = page_map.get(page_name)
+                if mapped:
+                    return f"[{label}]({_wiki_page_url(repo_full_name, mapped.slug)})"
         return match.group(0)
 
     text = IMAGE_RE.sub(replace_image, text)
@@ -296,6 +298,18 @@ def _dedupe_name(base: str, used: set[str]) -> str:
         index += 1
     used.add(candidate)
     return candidate
+
+
+def _candidate_names(target: str) -> list[str]:
+    names: list[str] = []
+    current = Path(target).name
+    while current and current not in names:
+        names.append(current)
+        decoded = unquote(current)
+        if decoded == current:
+            break
+        current = decoded
+    return names
 
 
 def _write(path: Path, text: str) -> Path:
