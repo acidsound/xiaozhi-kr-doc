@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass
@@ -25,13 +26,19 @@ class WikiPage:
     page_title: str
     source_url: str | None
 
+    @property
+    def slug(self) -> str:
+        return self.output_name.removesuffix(".md")
+
 
 def build_github_wiki(
     markdown_dir: Path,
     markdown_kr_dir: Path,
     assets_dir: Path,
     out_dir: Path,
+    repo_full_name: str | None = None,
 ) -> list[Path]:
+    repo_full_name = repo_full_name or _git_repo_full_name()
     pages = _collect_pages(markdown_dir, "ZH") + _collect_pages(markdown_kr_dir, "KO")
     page_map = {page.source_path.name: page for page in pages}
     asset_map = _copy_assets(assets_dir, out_dir / "images")
@@ -41,12 +48,12 @@ def build_github_wiki(
 
     for page in pages:
         text = page.source_path.read_text(encoding="utf-8")
-        rewritten = _rewrite_markdown(text, page_map, asset_map)
+        rewritten = _rewrite_markdown(text, page_map, asset_map, repo_full_name)
         path = out_dir / page.output_name
         path.write_text(rewritten, encoding="utf-8")
         written.append(path)
 
-    written.extend(_write_home_pages(out_dir, pages))
+    written.extend(_write_home_pages(out_dir, pages, repo_full_name))
     return written
 
 
@@ -114,7 +121,12 @@ def _copy_assets(assets_dir: Path, out_dir: Path) -> dict[str, str]:
     return mapping
 
 
-def _rewrite_markdown(text: str, page_map: dict[str, WikiPage], asset_map: dict[str, str]) -> str:
+def _rewrite_markdown(
+    text: str,
+    page_map: dict[str, WikiPage],
+    asset_map: dict[str, str],
+    repo_full_name: str | None,
+) -> str:
     def replace_image(match: re.Match[str]) -> str:
         alt, raw_target = match.groups()
         target = raw_target.strip("<>")
@@ -122,7 +134,7 @@ def _rewrite_markdown(text: str, page_map: dict[str, WikiPage], asset_map: dict[
             asset_name = Path(target).name
             mapped = asset_map.get(asset_name)
             if mapped:
-                return f"![{alt}](images/{mapped})"
+                return f"![{alt}]({_wiki_raw_image_url(repo_full_name, mapped)})"
         return match.group(0)
 
     def replace_link(match: re.Match[str]) -> str:
@@ -133,7 +145,7 @@ def _rewrite_markdown(text: str, page_map: dict[str, WikiPage], asset_map: dict[
         if target.endswith(".md"):
             mapped = page_map.get(Path(target).name)
             if mapped:
-                return f"[{label}]({mapped.output_name})"
+                return f"[{label}]({_wiki_page_url(repo_full_name, mapped.slug)})"
         return match.group(0)
 
     text = IMAGE_RE.sub(replace_image, text)
@@ -141,7 +153,7 @@ def _rewrite_markdown(text: str, page_map: dict[str, WikiPage], asset_map: dict[
     return text
 
 
-def _write_home_pages(out_dir: Path, pages: list[WikiPage]) -> list[Path]:
+def _write_home_pages(out_dir: Path, pages: list[WikiPage], repo_full_name: str | None) -> list[Path]:
     zh_pages = [page for page in pages if page.language == "ZH"]
     ko_pages = [page for page in pages if page.language == "KO"]
 
@@ -160,8 +172,8 @@ def _write_home_pages(out_dir: Path, pages: list[WikiPage]) -> list[Path]:
                     "",
                     "## Language",
                     "",
-                    f"- [한국어 시작 페이지]({ko_root.output_name if ko_root else 'Home-ko.md'})",
-                    f"- [中文开始页]({zh_root.output_name if zh_root else 'Home-zh.md'})",
+                    f"- [한국어 시작 페이지]({_wiki_page_url(repo_full_name, ko_root.slug if ko_root else 'Home-ko')})",
+                    f"- [中文开始页]({_wiki_page_url(repo_full_name, zh_root.slug if zh_root else 'Home-zh')})",
                     "",
                     "## Notes",
                     "",
@@ -179,6 +191,7 @@ def _write_home_pages(out_dir: Path, pages: list[WikiPage]) -> list[Path]:
                 "한국어로 번역된 Xiaozhi 문서를 모아둔 시작 페이지입니다.",
                 ko_root,
                 ko_pages,
+                repo_full_name,
             ),
         ),
         _write(
@@ -188,23 +201,37 @@ def _write_home_pages(out_dir: Path, pages: list[WikiPage]) -> list[Path]:
                 "这里汇总了 Xiaozhi 文档的中文归档版本。",
                 zh_root,
                 zh_pages,
+                repo_full_name,
             ),
         ),
         _write(
             out_dir / "_Sidebar.md",
-            _sidebar(ko_root, zh_root, ko_pages, zh_pages),
+            _sidebar(ko_root, zh_root, ko_pages, zh_pages, repo_full_name),
         ),
     ]
     return written
 
 
-def _home_language_page(header: str, intro: str, root: WikiPage | None, pages: list[WikiPage]) -> str:
+def _home_language_page(
+    header: str,
+    intro: str,
+    root: WikiPage | None,
+    pages: list[WikiPage],
+    repo_full_name: str | None,
+) -> str:
     lines = [header, "", intro, ""]
     if root is not None:
-        lines.extend(["## 메인 문서" if header.startswith("# 한국어") else "## 主文档", "", f"- [{root.page_title}]({root.output_name})", ""])
+        lines.extend(
+            [
+                "## 메인 문서" if header.startswith("# 한국어") else "## 主文档",
+                "",
+                f"- [{root.page_title}]({_wiki_page_url(repo_full_name, root.slug)})",
+                "",
+            ]
+        )
     lines.extend(["## 전체 문서" if header.startswith("# 한국어") else "## 全部文档", ""])
     for page in pages:
-        lines.append(f"- [{page.page_title}]({page.output_name})")
+        lines.append(f"- [{page.page_title}]({_wiki_page_url(repo_full_name, page.slug)})")
     lines.append("")
     return "\n".join(lines)
 
@@ -214,19 +241,20 @@ def _sidebar(
     zh_root: WikiPage | None,
     ko_pages: list[WikiPage],
     zh_pages: list[WikiPage],
+    repo_full_name: str | None,
 ) -> str:
     lines = [
-        "[Home](Home.md)",
+        f"[Home]({_wiki_page_url(repo_full_name, 'Home')})",
         "",
         "## Korean",
     ]
     if ko_root is not None:
-        lines.append(f"- [{ko_root.page_title}]({ko_root.output_name})")
-    lines.append("- [한국어 문서 목록](Home-ko.md)")
+        lines.append(f"- [{ko_root.page_title}]({_wiki_page_url(repo_full_name, ko_root.slug)})")
+    lines.append(f"- [한국어 문서 목록]({_wiki_page_url(repo_full_name, 'Home-ko')})")
     lines.extend(["", "## Chinese"])
     if zh_root is not None:
-        lines.append(f"- [{zh_root.page_title}]({zh_root.output_name})")
-    lines.append("- [中文文档列表](Home-zh.md)")
+        lines.append(f"- [{zh_root.page_title}]({_wiki_page_url(repo_full_name, zh_root.slug)})")
+    lines.append(f"- [中文文档列表]({_wiki_page_url(repo_full_name, 'Home-zh')})")
     lines.append("")
     return "\n".join(lines)
 
@@ -273,6 +301,33 @@ def _dedupe_name(base: str, used: set[str]) -> str:
 def _write(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _wiki_page_url(repo_full_name: str | None, slug: str) -> str:
+    if not repo_full_name:
+        return slug
+    return f"https://github.com/{repo_full_name}/wiki/{slug}"
+
+
+def _wiki_raw_image_url(repo_full_name: str | None, image_name: str) -> str:
+    if not repo_full_name:
+        return f"images/{image_name}"
+    return f"https://raw.githubusercontent.com/wiki/{repo_full_name}/images/{image_name}"
+
+
+def _git_repo_full_name() -> str | None:
+    try:
+        remote = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return None
+    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?$", remote)
+    if not match:
+        return None
+    return f"{match.group('owner')}/{match.group('repo')}"
 
 
 if __name__ == "__main__":
