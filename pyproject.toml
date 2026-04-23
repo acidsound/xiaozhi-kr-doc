@@ -1,0 +1,10 @@
+[project]
+name = "xiaozhi-tut-archive"
+version = "0.1.0"
+description = "Archive Xiaozhi Feishu wiki pages as Markdown without launching a browser."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+archive-feishu = "xiaozhi_archive.cli:main"
+build-github-wiki = "xiaozhi_archive.github_wiki:main"
